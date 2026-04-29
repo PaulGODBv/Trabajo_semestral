@@ -1,17 +1,36 @@
 import { useEffect } from 'react'
-import { getMesas } from '../src/services/mesasService'
+import { getMesas } from './services/mesasService'
+import { getReservas, createReserva } from './services/reservasService'
+import { getHorarios, createHorario } from './services/horariosService'
 
-function Home() {
+function App() {
+
   useEffect(() => {
-    const fetchData = async () => {
-      const { data, error } = await getMesas()
-      console.log(data, error)
+    const test = async () => {
+
+      // MESAS
+      const mesas = await getMesas()
+      console.log('MESAS:', mesas)
+
+      // RESERVAS
+      const reservas = await getReservas()
+      console.log('RESERVAS:', reservas)
+
+      // HORARIOS
+      const horarios = await getHorarios()
+      console.log('HORARIOS:', horarios)
+
     }
 
-    fetchData()
+    test()
   }, [])
 
-  return <h1>Home</h1>
+  return (
+    <div>
+      <h1>The Gordo</h1>
+      <p>Verificar consola para conexión</p>
+    </div>
+  )
 }
 
-export default Home
+export default App
