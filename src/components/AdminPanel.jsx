@@ -1,20 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { createMesa, deleteMesa, getMesas, updateMesa } from '../services/mesasService'
+import CreateMesaModal from './CreateMesaModal'
+import { deleteMesa, getMesas, updateMesa } from '../services/mesasService'
 import { getReservas } from '../services/reservasService'
 
 const estadoReservaActiva = ['activa', 'confirmada']
 
-const initialForm = {
-  numero: '',
-  capacidad: '2',
-  ubicacion: 'Salón principal',
-  estado: 'disponible'
-}
-
 function AdminPanel({ onMesasChanged }) {
   const [mesas, setMesas] = useState([])
   const [reservas, setReservas] = useState([])
-  const [form, setForm] = useState(initialForm)
+  const [showCreateMesaModal, setShowCreateMesaModal] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -73,78 +67,11 @@ function AdminPanel({ onMesasChanged }) {
     }
   }, [mesas, reservas])
 
-  const handleChange = (event) => {
-    const { name, value } = event.target
-
-    const cleanValue = name === 'numero' || name === 'capacidad'
-      ? value.replace(/\D/g, '')
-      : value
-
-    setForm((currentForm) => ({
-      ...currentForm,
-      [name]: cleanValue
-    }))
-
-    setError('')
-    setMensaje('')
-  }
-
-  const validarMesa = () => {
-    const numero = Number(form.numero)
-    const capacidad = Number(form.capacidad)
-
-    if (!numero || numero < 1) {
-      return 'Ingresa un número de mesa válido.'
-    }
-
-    if (!capacidad || capacidad < 1) {
-      return 'Ingresa una capacidad válida.'
-    }
-
-    const existeMesa = mesas.some((mesa) => Number(mesa.numero) === numero)
-
-    if (existeMesa) {
-      return `Ya existe una mesa con el número ${numero}.`
-    }
-
-    return ''
-  }
-
-  const handleCrearMesa = async (event) => {
-    event.preventDefault()
-
-    const validationError = validarMesa()
-
-    if (validationError) {
-      setError(validationError)
-      return
-    }
-
-    setSaving(true)
-    setError('')
-    setMensaje('')
-
-    const nuevaMesa = {
-      numero: Number(form.numero),
-      capacidad: Number(form.capacidad),
-      ubicacion: form.ubicacion.trim() || null,
-      estado: form.estado
-    }
-
-    const { error: createError } = await createMesa(nuevaMesa)
-
-    if (createError) {
-      console.error(createError)
-      setError('No se pudo crear la mesa. Revisa las políticas RLS de Supabase.')
-      setSaving(false)
-      return
-    }
-
-    setForm(initialForm)
+  const handleMesaCreada = async () => {
+    setShowCreateMesaModal(false)
     setMensaje('Mesa creada correctamente.')
     await cargarPanel()
     await onMesasChanged()
-    setSaving(false)
   }
 
   const handleCambiarEstado = async (mesa) => {
@@ -193,45 +120,6 @@ function AdminPanel({ onMesasChanged }) {
     setSaving(false)
   }
 
-  const handleLiberarMesasSinReserva = async () => {
-    const mesasParaLiberar = mesas.filter((mesa) => {
-      return mesa.estado === 'ocupada' && !mesasConReservaActiva.has(mesa.id)
-    })
-
-    if (mesasParaLiberar.length === 0) {
-      setMensaje('No hay mesas ocupadas sin reserva activa.')
-      return
-    }
-
-    const confirmar = window.confirm(
-      `Se liberarán ${mesasParaLiberar.length} mesa(s) ocupada(s) que no tienen reserva activa. ¿Continuar?`
-    )
-
-    if (!confirmar) return
-
-    setSaving(true)
-    setError('')
-    setMensaje('')
-
-    const resultados = await Promise.all(
-      mesasParaLiberar.map((mesa) => updateMesa(mesa.id, { estado: 'disponible' }))
-    )
-
-    const huboError = resultados.some((resultado) => resultado.error)
-
-    if (huboError) {
-      console.error(resultados)
-      setError('Algunas mesas no pudieron liberarse.')
-      setSaving(false)
-      return
-    }
-
-    setMensaje('Mesas sin reserva activa liberadas correctamente.')
-    await cargarPanel()
-    await onMesasChanged()
-    setSaving(false)
-  }
-
   const handleRecargar = async () => {
     await cargarPanel()
     await onMesasChanged()
@@ -249,13 +137,24 @@ function AdminPanel({ onMesasChanged }) {
         </div>
 
         <div className="admin-actions">
-          <button type="button" className="button button--ghost" onClick={handleRecargar} disabled={loading || saving}>
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={() => setShowCreateMesaModal(true)}
+            disabled={loading || saving}
+          >
+            Crear nueva mesa
+          </button>
+
+          <button
+            type="button"
+            className="button button--ghost"
+            onClick={handleRecargar}
+            disabled={loading || saving}
+          >
             Recargar datos
           </button>
 
-          <button type="button" className="button button--primary" onClick={handleLiberarMesasSinReserva} disabled={loading || saving}>
-            Liberar mesas sin reserva
-          </button>
         </div>
       </div>
 
@@ -277,66 +176,9 @@ function AdminPanel({ onMesasChanged }) {
       {error && <p className="alert alert--error">{error}</p>}
       {mensaje && <p className="alert alert--success">{mensaje}</p>}
 
-      <form className="admin-form" onSubmit={handleCrearMesa}>
-        <h3>Crear nueva mesa</h3>
-
-        <div className="admin-form__grid">
-          <label>
-            Número de mesa
-            <input
-              name="numero"
-              value={form.numero}
-              onChange={handleChange}
-              placeholder="Ej: 9"
-              inputMode="numeric"
-              maxLength="3"
-            />
-          </label>
-
-          <label>
-            Capacidad
-            <select name="capacidad" value={form.capacidad} onChange={handleChange}>
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map((capacidad) => (
-                <option key={capacidad} value={capacidad}>
-                  {capacidad} {capacidad === 1 ? 'persona' : 'personas'}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Ubicación
-            <select name="ubicacion" value={form.ubicacion} onChange={handleChange}>
-              <option value="Salón principal">Salón principal</option>
-              <option value="Zona roca">Zona roca</option>
-              <option value="Centro">Centro</option>
-              <option value="Terraza">Terraza</option>
-              <option value="Barra">Barra</option>
-            </select>
-          </label>
-
-          <label>
-            Estado inicial
-            <select name="estado" value={form.estado} onChange={handleChange}>
-              <option value="disponible">Disponible</option>
-              <option value="ocupada">Ocupada</option>
-            </select>
-          </label>
-        </div>
-
-        <div className="form-actions">
-          <button type="submit" className="button button--primary" disabled={saving}>
-            {saving ? 'Guardando...' : 'Crear mesa'}
-          </button>
-        </div>
-      </form>
-
       <div className="admin-table-card">
         <div className="admin-table-card__header">
           <h3>Mesas registradas</h3>
-          <p>
-            Si eliminaste reservas directamente en Supabase, usa “Liberar mesas sin reserva”.
-          </p>
         </div>
 
         {loading ? (
@@ -344,7 +186,7 @@ function AdminPanel({ onMesasChanged }) {
         ) : mesas.length === 0 ? (
           <div className="no-tables">
             <h3>No hay mesas registradas</h3>
-            <p>Crea la primera mesa desde el formulario superior.</p>
+            <p>Crea la primera mesa desde el botón superior.</p>
           </div>
         ) : (
           <div className="admin-table-wrapper">
@@ -421,6 +263,14 @@ function AdminPanel({ onMesasChanged }) {
           </div>
         )}
       </div>
+
+      {showCreateMesaModal && (
+        <CreateMesaModal
+          mesas={mesas}
+          onClose={() => setShowCreateMesaModal(false)}
+          onMesaCreada={handleMesaCreada}
+        />
+      )}
     </section>
   )
 }

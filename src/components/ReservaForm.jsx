@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { updateMesa } from '../services/mesasService'
 import { createReserva } from '../services/reservasService'
 import ConfirmationModal from './ConfirmationModal'
@@ -7,6 +7,9 @@ const getToday = () => new Date().toISOString().split('T')[0]
 
 function ReservaForm({ mesa, onCancel, onReservaCreada }) {
   const capacidadMesa = Number(mesa?.capacidad) || 1
+
+  const fechaInputRef = useRef(null)
+  const horaInputRef = useRef(null)
 
   const [form, setForm] = useState({
     cliente_nombre: '',
@@ -23,6 +26,22 @@ function ReservaForm({ mesa, onCancel, onReservaCreada }) {
 
   const opcionesPersonas = Array.from({ length: capacidadMesa }, (_, index) => index + 1)
   const personas = Number(form.num_personas)
+
+  const abrirSelectorNativo = (inputRef) => {
+    const input = inputRef.current
+
+    if (!input) return
+
+    input.focus()
+
+    if (typeof input.showPicker === 'function') {
+      try {
+        input.showPicker()
+      } catch {
+        input.focus()
+      }
+    }
+  }
 
   const resumenReserva = useMemo(() => ({
     mesa: mesa.numero,
@@ -204,10 +223,12 @@ function ReservaForm({ mesa, onCancel, onReservaCreada }) {
           <label>
             Fecha
             <input
+              ref={fechaInputRef}
               type="date"
               name="fecha"
               value={form.fecha}
               min={getToday()}
+              onClick={() => abrirSelectorNativo(fechaInputRef)}
               onChange={handleChange}
               aria-invalid={Boolean(errors.fecha)}
             />
@@ -217,9 +238,11 @@ function ReservaForm({ mesa, onCancel, onReservaCreada }) {
           <label>
             Hora
             <input
+              ref={horaInputRef}
               type="time"
               name="hora"
               value={form.hora}
+              onClick={() => abrirSelectorNativo(horaInputRef)}
               onChange={handleChange}
               aria-invalid={Boolean(errors.hora)}
             />

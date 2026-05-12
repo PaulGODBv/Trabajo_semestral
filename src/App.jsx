@@ -127,11 +127,21 @@ function App() {
     <main className="app-shell">
       <header className="app-header">
         <div className="app-header__content">
-          <p className="eyebrow">Sistema de reservas</p>
-          <h1>The Gordo</h1>
-          <p className="app-header__description">
-            Selecciona una mesa disponible en el salón, completa los datos del cliente y confirma la reserva.
-          </p>
+          <div className="brand-block">
+            <img
+              src="/the-gordo-logo.png"
+              alt="Logo de The Gordo"
+              className="app-logo"
+            />
+
+            <div>
+              <p className="eyebrow">Sistema de reservas</p>
+              <h1>The Gordo</h1>
+              <p className="app-header__description">
+                Selecciona una mesa disponible en el salón, completa los datos del cliente y confirma la reserva.
+              </p>
+            </div>
+          </div>
         </div>
 
         <div className="header-side">
