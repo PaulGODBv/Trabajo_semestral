@@ -16,24 +16,25 @@ function MesasList() {
   }, [])
 
   const eliminar = async (id) => {
-    const confirmar = window.confirm('¿Seguro que deseas eliminar esta mesa?')
-
+    const confirmar = window.confirm('¿Eliminar mesa?')
     if (!confirmar) return
 
     await deleteMesa(id)
     cargarMesas()
   }
 
+  const disponibles = mesas.filter(m => m.estado === 'disponible')
+  const ocupadas = mesas.filter(m => m.estado === 'ocupada')
+
   return (
     <div>
-      <h2>Mesas</h2>
 
-      <div style={{ display: 'grid', gap: '10px' }}>
-        {mesas.map((mesa) => (
-          <div key={mesa.id} style={{ border: '1px solid #ccc', padding: '10px' }}>
+      <h2>Disponibles</h2>
+      <div style={styles.grid}>
+        {disponibles.map((mesa) => (
+          <div key={mesa.id} style={styles.card}>
             <h3>Mesa {mesa.numero}</h3>
             <p>{mesa.capacidad} personas</p>
-            <p>{mesa.estado}</p>
 
             <button onClick={() => setMesaSeleccionada(mesa)}>
               Reservar
@@ -46,14 +47,44 @@ function MesasList() {
         ))}
       </div>
 
+      <h2>Ocupadas</h2>
+      <div style={styles.grid}>
+        {ocupadas.map((mesa) => (
+          <div key={mesa.id} style={styles.card}>
+            <h3>Mesa {mesa.numero}</h3>
+            <p>{mesa.capacidad} personas</p>
+            <p>Ocupada</p>
+          </div>
+        ))}
+      </div>
+
+      {/* 🔥 MODAL */}
       {mesaSeleccionada && (
-        <ReservaForm
-          mesa={mesaSeleccionada}
-          onClose={() => setMesaSeleccionada(null)}
-        />
+        <Modal onClose={() => setMesaSeleccionada(null)}>
+          <ReservaForm
+            mesa={mesaSeleccionada}
+            onClose={() => {
+              setMesaSeleccionada(null)
+              cargarMesas()
+            }}
+          />
+        </Modal>
       )}
+
     </div>
   )
 }
 
 export default MesasList
+
+const styles = {
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '10px'
+  },
+  card: {
+    border: '1px solid #ccc',
+    padding: '10px'
+  }
+}
