@@ -1,236 +1,231 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import SalonMap from './components/SalonMap'
 import ReservaForm from './components/ReservaForm'
+import ReservaConfirmada from './components/ReservaConfirmada'
 import AdminPanel from './components/AdminPanel'
 import AdminLoginModal from './components/AdminLoginModal'
+import ProtectedRoute from './components/ProtectedRoute'
+import Toast from './components/Toast'
 import { getMesas } from './services/mesasService'
-import { supabase } from './services/supabaseClient'
+import { AuthContext } from './context/AuthContext'
+import { useToast } from './context/ToastContext'
 import './App.css'
 
-function App() {
-  const [vistaActiva, setVistaActiva] = useState('cliente')
-  const [mesas, setMesas] = useState([])
+// ── Shared header (always visible) ──────────────────────────────────
+function AppHeader({ mesas, loading, onAbrirAdmin, onVolverCliente, onSignOut, checkingSession }) {
+  const location = useLocation()
+  const isAdmin = location.pathname === '/admin'
+  const { session } = useContext(AuthContext)
+
+  const resumen = useMemo(() => ({
+    total: mesas.length,
+    disponibles: mesas.filter((m) => m.estado === 'disponible').length,
+    ocupadas: mesas.filter((m) => m.estado === 'ocupada').length
+  }), [mesas])
+
+  return (
+    <header className="app-header">
+      <div className="app-header__content">
+        <div className="brand-block">
+          <img src="/the-gordo-logo.png" alt="Logo del restaurante Comidas Rápidas The Gordo" className="app-logo" />
+          <div>
+            <p className="eyebrow">Sistema de reservas</p>
+            <h1>The Gordo</h1>
+            <p className="app-header__description">
+              Selecciona una mesa disponible en el salón, completa los datos y confirma tu reserva.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="header-side">
+        <div className="admin-top-actions">
+          {isAdmin ? (
+            <button
+              type="button"
+              className="admin-access-button admin-access-button--secondary"
+              onClick={onVolverCliente}
+            >
+              Vista cliente
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="admin-access-button"
+              onClick={onAbrirAdmin}
+              disabled={checkingSession}
+            >
+              Administrador
+            </button>
+          )}
+          {session && (
+            <button
+              type="button"
+              className="admin-access-button admin-access-button--logout"
+              onClick={onSignOut}
+            >
+              Cerrar sesión
+            </button>
+          )}
+        </div>
+
+        <section className="summary-panel" aria-label="Resumen del salón">
+          <article>
+            <strong>{resumen.total}</strong>
+            <span>Mesas</span>
+          </article>
+          <article>
+            <strong>{resumen.disponibles}</strong>
+            <span>Disponibles</span>
+          </article>
+          <article>
+            <strong>{resumen.ocupadas}</strong>
+            <span>Ocupadas</span>
+          </article>
+        </section>
+      </div>
+    </header>
+  )
+}
+
+// ── Client view ──────────────────────────────────────────────────────
+function ClienteView({ mesas, loading, onMesasChanged }) {
   const [mesaSeleccionada, setMesaSeleccionada] = useState(null)
-  const [adminSession, setAdminSession] = useState(null)
-  const [showAdminLogin, setShowAdminLogin] = useState(false)
-  const [checkingSession, setCheckingSession] = useState(true)
+  const [reservaConfirmada, setReservaConfirmada] = useState(null)
+
+  const handleSeleccion = (mesa) => {
+    setReservaConfirmada(null)
+    setMesaSeleccionada(mesa)
+  }
+
+  const handleReservaCreada = async (datosReserva) => {
+    setMesaSeleccionada(null)
+    setReservaConfirmada(datosReserva)
+    await onMesasChanged()
+  }
+
+  const handleVolver = async () => {
+    setReservaConfirmada(null)
+    setMesaSeleccionada(null)
+    await onMesasChanged()
+  }
+
+  return (
+    <section className="reservation-layout">
+      <SalonMap
+        mesas={mesas}
+        loading={loading}
+        mesaSeleccionada={mesaSeleccionada}
+        onSelectMesa={handleSeleccion}
+      />
+
+      <aside className="booking-panel" aria-label="Panel de reserva">
+        {reservaConfirmada ? (
+          <ReservaConfirmada reserva={reservaConfirmada} onVolver={handleVolver} />
+        ) : mesaSeleccionada ? (
+          <ReservaForm
+            mesa={mesaSeleccionada}
+            onCancel={() => setMesaSeleccionada(null)}
+            onReservaCreada={handleReservaCreada}
+          />
+        ) : (
+          <div className="empty-selection">
+            <span className="empty-selection__icon" aria-hidden="true">🍖</span>
+            <h2>Elige una mesa</h2>
+            <p>Las mesas verdes están disponibles. Haz clic en una para iniciar tu reserva.</p>
+          </div>
+        )}
+      </aside>
+    </section>
+  )
+}
+
+// ── Root App ─────────────────────────────────────────────────────────
+function App() {
+  const navigate = useNavigate()
+  const { session, loading: checkingSession, signOut } = useContext(AuthContext)
+  const { addToast } = useToast()
+
+  const [mesas, setMesas] = useState([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [mensaje, setMensaje] = useState('')
+  const [showAdminLogin, setShowAdminLogin] = useState(false)
 
   const cargarMesas = useCallback(async () => {
     setLoading(true)
-    setError('')
-
-    const { data, error: supabaseError } = await getMesas()
-
-    if (supabaseError) {
-      console.error(supabaseError)
-      setError('No se pudieron cargar las mesas. Revisa la conexión con Supabase o las políticas RLS.')
+    const { data, error } = await getMesas()
+    if (error) {
+      addToast('No se pudieron cargar las mesas. Revisa la conexión con Supabase.', 'error')
       setMesas([])
     } else {
       setMesas(data || [])
     }
-
     setLoading(false)
-  }, [])
+  }, [addToast])
 
-  useEffect(() => {
-    cargarMesas()
-  }, [cargarMesas])
+  useEffect(() => { cargarMesas() }, [cargarMesas])
 
-  useEffect(() => {
-    let authSubscription
-
-    const initSession = async () => {
-      const { data } = await supabase.auth.getSession()
-      setAdminSession(data.session || null)
-      setCheckingSession(false)
+  const abrirAdmin = () => {
+    if (session) {
+      navigate('/admin')
+    } else {
+      setShowAdminLogin(true)
     }
-
-    initSession()
-
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAdminSession(session || null)
-
-      if (!session) {
-        setVistaActiva((currentView) => currentView === 'admin' ? 'cliente' : currentView)
-      }
-    })
-
-    authSubscription = data.subscription
-
-    return () => {
-      authSubscription?.unsubscribe()
-    }
-  }, [])
-
-  const resumen = useMemo(() => {
-    const disponibles = mesas.filter((mesa) => mesa.estado === 'disponible').length
-    const ocupadas = mesas.filter((mesa) => mesa.estado === 'ocupada').length
-
-    return {
-      total: mesas.length,
-      disponibles,
-      ocupadas
-    }
-  }, [mesas])
-
-  const handleSeleccionMesa = (mesa) => {
-    setMensaje('')
-    setMesaSeleccionada(mesa)
   }
 
-  const handleReservaCreada = async () => {
-    setMesaSeleccionada(null)
-    setMensaje('Reserva confirmada correctamente. La mesa quedó marcada como ocupada.')
-    await cargarMesas()
+  const volverCliente = () => navigate('/')
+
+  const handleSignOut = async () => {
+    await signOut()
+    navigate('/')
+    addToast('Sesión cerrada correctamente.', 'info')
   }
 
-  const abrirVistaAdmin = () => {
-    setMensaje('')
-    setError('')
-    setMesaSeleccionada(null)
-
-    if (adminSession) {
-      setVistaActiva('admin')
-      return
-    }
-
-    setShowAdminLogin(true)
-  }
-
-  const volverVistaCliente = () => {
-    setVistaActiva('cliente')
-    setMesaSeleccionada(null)
-    setMensaje('')
-    setError('')
-  }
-
-  const handleAdminLoginSuccess = (session) => {
-    setAdminSession(session)
+  const handleLoginSuccess = () => {
     setShowAdminLogin(false)
-    setVistaActiva('admin')
-    setMesaSeleccionada(null)
-    setMensaje('Sesión de administrador iniciada correctamente.')
-  }
-
-  const cerrarSesionAdmin = async () => {
-    await supabase.auth.signOut()
-    setAdminSession(null)
-    setVistaActiva('cliente')
-    setMesaSeleccionada(null)
-    setMensaje('Sesión de administrador cerrada.')
+    navigate('/admin')
+    addToast('Bienvenido al panel de administración.', 'success')
   }
 
   return (
     <main className="app-shell">
-      <header className="app-header">
-        <div className="app-header__content">
-          <div className="brand-block">
-            <img
-              src="/the-gordo-logo.png"
-              alt="Logo de The Gordo"
-              className="app-logo"
+      <Toast />
+
+      <AppHeader
+        mesas={mesas}
+        loading={loading}
+        onAbrirAdmin={abrirAdmin}
+        onVolverCliente={volverCliente}
+        onSignOut={handleSignOut}
+        checkingSession={checkingSession}
+      />
+
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <ClienteView
+              mesas={mesas}
+              loading={loading}
+              onMesasChanged={cargarMesas}
             />
-
-            <div>
-              <p className="eyebrow">Sistema de reservas</p>
-              <h1>The Gordo</h1>
-              <p className="app-header__description">
-                Selecciona una mesa disponible en el salón, completa los datos del cliente y confirma la reserva.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="header-side">
-          <div className="admin-top-actions">
-            {vistaActiva === 'admin' ? (
-              <button
-                type="button"
-                className="admin-access-button admin-access-button--secondary"
-                onClick={volverVistaCliente}
-              >
-                Vista cliente
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="admin-access-button"
-                onClick={abrirVistaAdmin}
-                disabled={checkingSession}
-              >
-                Administrador
-              </button>
-            )}
-
-            {adminSession && (
-              <button
-                type="button"
-                className="admin-access-button admin-access-button--logout"
-                onClick={cerrarSesionAdmin}
-              >
-                Cerrar sesión
-              </button>
-            )}
-          </div>
-
-          <section className="summary-panel" aria-label="Resumen del salón">
-            <article>
-              <strong>{resumen.total}</strong>
-              <span>Mesas</span>
-            </article>
-            <article>
-              <strong>{resumen.disponibles}</strong>
-              <span>Disponibles</span>
-            </article>
-            <article>
-              <strong>{resumen.ocupadas}</strong>
-              <span>Ocupadas</span>
-            </article>
-          </section>
-        </div>
-      </header>
-
-      {error && <p className="alert alert--error">{error}</p>}
-      {mensaje && <p className="alert alert--success">{mensaje}</p>}
-
-      {vistaActiva === 'admin' && adminSession ? (
-        <AdminPanel onMesasChanged={cargarMesas} />
-      ) : (
-        <section className="reservation-layout">
-          <SalonMap
-            mesas={mesas}
-            loading={loading}
-            mesaSeleccionada={mesaSeleccionada}
-            onSelectMesa={handleSeleccionMesa}
-          />
-
-          <aside className="booking-panel" aria-label="Panel de reserva">
-            {mesaSeleccionada ? (
-              <ReservaForm
-                mesa={mesaSeleccionada}
-                onCancel={() => setMesaSeleccionada(null)}
-                onReservaCreada={handleReservaCreada}
-              />
-            ) : (
-              <div className="empty-selection">
-                <span className="empty-selection__icon">🍽️</span>
-                <h2>Elige una mesa</h2>
-                <p>
-                  Las mesas verdes están disponibles. Haz clic en una para iniciar la reserva.
-                </p>
-              </div>
-            )}
-          </aside>
-        </section>
-      )}
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute>
+              <AdminPanel onMesasChanged={cargarMesas} />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
 
       {showAdminLogin && (
         <AdminLoginModal
           onClose={() => setShowAdminLogin(false)}
-          onLoginSuccess={handleAdminLoginSuccess}
+          onLoginSuccess={handleLoginSuccess}
         />
       )}
     </main>

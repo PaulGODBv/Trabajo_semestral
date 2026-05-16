@@ -1,68 +1,58 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../services/supabaseClient'
 
-function AdminLoginModal({ onClose, onLoginSuccess }) {
-  const [form, setForm] = useState({
-    email: '',
-    password: ''
-  })
-
+export default function AdminLoginModal({ onClose, onLoginSuccess }) {
+  const [form, setForm] = useState({ email: '', password: '' })
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
+  const dialogRef = useRef(null)
+  const firstRef = useRef(null)
 
   useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape' && !loading) {
-        onClose()
+    const prev = document.activeElement
+    document.body.style.overflow = 'hidden'
+    firstRef.current?.focus()
+
+    const focusable = 'button:not(:disabled),input:not(:disabled),[tabindex]:not([tabindex="-1"])'
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !loading) { onClose(); return }
+      if (e.key !== 'Tab') return
+      const nodes = [...(dialogRef.current?.querySelectorAll(focusable) || [])]
+      const first = nodes[0]; const last = nodes[nodes.length - 1]
+      if (e.shiftKey ? document.activeElement === first : document.activeElement === last) {
+        e.preventDefault()
+        ;(e.shiftKey ? last : first)?.focus()
       }
     }
 
-    document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', handleKeyDown)
-
     return () => {
-      document.body.style.overflow = ''
       window.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = ''
+      prev?.focus()
     }
   }, [loading, onClose])
 
-  const handleChange = (event) => {
-    const { name, value } = event.target
-
-    setForm((currentForm) => ({
-      ...currentForm,
-      [name]: value
-    }))
-
+  const handleChange = (e) => {
+    const { name, value } = e.target
+    setForm((prev) => ({ ...prev, [name]: value }))
     setErrors({})
   }
 
-  const validarFormulario = () => {
-    const nextErrors = {}
-    const email = form.email.trim()
-
-    if (!email) {
-      nextErrors.email = 'Ingresa el correo del administrador.'
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
-      nextErrors.email = 'Ingresa un correo válido.'
-    }
-
-    if (!form.password) {
-      nextErrors.password = 'Ingresa la contraseña.'
-    } else if (form.password.length < 6) {
-      nextErrors.password = 'La contraseña debe tener mínimo 6 caracteres.'
-    }
-
-    setErrors(nextErrors)
-    return Object.keys(nextErrors).length === 0
+  const validar = () => {
+    const next = {}
+    if (!form.email.trim()) next.email = 'Ingresa el correo del administrador.'
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())) next.email = 'Ingresa un correo válido.'
+    if (!form.password) next.password = 'Ingresa la contraseña.'
+    else if (form.password.length < 6) next.password = 'La contraseña debe tener mínimo 6 caracteres.'
+    setErrors(next)
+    return Object.keys(next).length === 0
   }
 
-  const handleSubmit = async (event) => {
-    event.preventDefault()
-
-    if (!validarFormulario()) return
-
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!validar()) return
     setLoading(true)
     setErrors({})
 
@@ -72,10 +62,7 @@ function AdminLoginModal({ onClose, onLoginSuccess }) {
     })
 
     if (error) {
-      console.error(error)
-      setErrors({
-        general: 'Correo o contraseña incorrectos. Intenta de nuevo.'
-      })
+      setErrors({ general: 'Correo o contraseña incorrectos. Intenta de nuevo.' })
       setLoading(false)
       return
     }
@@ -85,8 +72,9 @@ function AdminLoginModal({ onClose, onLoginSuccess }) {
   }
 
   return createPortal(
-    <div className="modal-overlay">
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !loading && onClose()}>
       <section
+        ref={dialogRef}
         className="admin-login-modal"
         role="dialog"
         aria-modal="true"
@@ -95,17 +83,17 @@ function AdminLoginModal({ onClose, onLoginSuccess }) {
         <div className="admin-login-modal__header">
           <p className="eyebrow">Acceso restringido</p>
           <h2 id="admin-login-title">Ingreso administrador</h2>
-          <p>
-            Solo el personal autorizado puede modificar mesas y estados del salón.
-          </p>
+          <p>Solo el personal autorizado puede gestionar mesas y reservas.</p>
         </div>
 
-        {errors.general && <p className="alert alert--error">{errors.general}</p>}
+        {errors.general && <p className="alert alert--error" role="alert">{errors.general}</p>}
 
         <form className="admin-login-form" onSubmit={handleSubmit} noValidate>
-          <label>
+          <label htmlFor="al-email">
             Correo
             <input
+              id="al-email"
+              ref={firstRef}
               type="email"
               name="email"
               value={form.email}
@@ -113,13 +101,15 @@ function AdminLoginModal({ onClose, onLoginSuccess }) {
               placeholder="admin@thegordo.com"
               autoComplete="email"
               aria-invalid={Boolean(errors.email)}
+              aria-describedby={errors.email ? 'al-email-err' : undefined}
             />
-            {errors.email && <small>{errors.email}</small>}
+            {errors.email && <small id="al-email-err" role="alert">{errors.email}</small>}
           </label>
 
-          <label>
+          <label htmlFor="al-pass">
             Contraseña
             <input
+              id="al-pass"
               type="password"
               name="password"
               value={form.password}
@@ -127,25 +117,16 @@ function AdminLoginModal({ onClose, onLoginSuccess }) {
               placeholder="••••••••"
               autoComplete="current-password"
               aria-invalid={Boolean(errors.password)}
+              aria-describedby={errors.password ? 'al-pass-err' : undefined}
             />
-            {errors.password && <small>{errors.password}</small>}
+            {errors.password && <small id="al-pass-err" role="alert">{errors.password}</small>}
           </label>
 
           <div className="admin-login-modal__actions">
-            <button
-              type="button"
-              className="button button--ghost"
-              onClick={onClose}
-              disabled={loading}
-            >
+            <button type="button" className="button button--ghost" onClick={onClose} disabled={loading}>
               Cancelar
             </button>
-
-            <button
-              type="submit"
-              className="button button--primary"
-              disabled={loading}
-            >
+            <button type="submit" className="button button--primary" disabled={loading}>
               {loading ? 'Ingresando...' : 'Ingresar'}
             </button>
           </div>
@@ -155,5 +136,3 @@ function AdminLoginModal({ onClose, onLoginSuccess }) {
     document.body
   )
 }
-
-export default AdminLoginModal

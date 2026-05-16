@@ -1,83 +1,75 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 
-function ConfirmationModal({
-  reserva,
-  isSubmitting,
-  onClose,
-  onConfirm
-}) {
+export default function ConfirmationModal({ reserva, isSubmitting, onClose, onConfirm }) {
+  const dialogRef = useRef(null)
+  const confirmRef = useRef(null)
+
   useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape' && !isSubmitting) {
-        onClose()
+    const prev = document.activeElement
+    document.body.style.overflow = 'hidden'
+    confirmRef.current?.focus()
+
+    const focusable = 'button:not(:disabled),[tabindex]:not([tabindex="-1"])'
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !isSubmitting) { onClose(); return }
+      if (e.key !== 'Tab') return
+      const nodes = [...(dialogRef.current?.querySelectorAll(focusable) || [])]
+      const first = nodes[0]; const last = nodes[nodes.length - 1]
+      if (e.shiftKey ? document.activeElement === first : document.activeElement === last) {
+        e.preventDefault()
+        ;(e.shiftKey ? last : first)?.focus()
       }
     }
 
-    document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', handleKeyDown)
-
     return () => {
-      document.body.style.overflow = ''
       window.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = ''
+      prev?.focus()
     }
   }, [isSubmitting, onClose])
 
-  return (
-    <div className="modal-overlay" role="presentation">
+  return createPortal(
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !isSubmitting && onClose()}>
       <section
+        ref={dialogRef}
         className="reservation-modal"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="reservation-modal-title"
+        aria-labelledby="rm-title"
+        aria-describedby="rm-desc"
       >
         <div className="reservation-modal__header">
           <p className="eyebrow">Última revisión</p>
-          <h2 id="reservation-modal-title">Revisa antes de confirmar</h2>
-          <p>
-            Verifica que los datos estén correctos antes de guardar la reserva.
-          </p>
+          <h2 id="rm-title">Revisa antes de confirmar</h2>
+          <p id="rm-desc">Verifica que los datos estén correctos antes de guardar la reserva.</p>
         </div>
 
         <div className="reservation-modal__stone">
           <ul className="reservation-modal__list">
-            <li>
-              <span>Mesa</span>
-              <strong>{reserva.mesa}</strong>
-            </li>
-            <li>
-              <span>Cliente</span>
-              <strong>{reserva.cliente}</strong>
-            </li>
-            <li>
-              <span>Contacto</span>
-              <strong>{reserva.telefono}</strong>
-            </li>
-            <li>
-              <span>Correo</span>
-              <strong>{reserva.email}</strong>
-            </li>
-            <li>
-              <span>Fecha y hora</span>
-              <strong>{reserva.fecha} · {reserva.hora}</strong>
-            </li>
-            <li>
-              <span>Personas</span>
-              <strong>{reserva.personas} de {reserva.capacidad}</strong>
-            </li>
+            {[
+              ['Mesa', reserva.mesa],
+              ['Cliente', reserva.cliente],
+              ['Contacto', reserva.telefono],
+              ['Correo', reserva.email],
+              ['Fecha y hora', `${reserva.fecha} · ${reserva.hora}`],
+              ['Personas', `${reserva.personas} de ${reserva.capacidad}`]
+            ].map(([label, value]) => (
+              <li key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </li>
+            ))}
           </ul>
         </div>
 
         <div className="reservation-modal__actions">
-          <button
-            type="button"
-            className="button button--ghost"
-            onClick={onClose}
-            disabled={isSubmitting}
-          >
+          <button type="button" className="button button--ghost" onClick={onClose} disabled={isSubmitting}>
             Volver a editar
           </button>
-
           <button
+            ref={confirmRef}
             type="button"
             className="button button--primary"
             onClick={onConfirm}
@@ -87,8 +79,7 @@ function ConfirmationModal({
           </button>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body
   )
 }
-
-export default ConfirmationModal
