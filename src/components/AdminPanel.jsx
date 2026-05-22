@@ -1,406 +1,515 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  AlertTriangle, ChevronDown, Clock, ClipboardList,
+  Lock, MoreHorizontal, Pencil, Plus, RefreshCw,
+  TableProperties, Trash2, Unlock
+} from 'lucide-react'
 import CreateMesaModal from './CreateMesaModal'
 import EditMesaModal from './EditMesaModal'
 import AdminReservas from './AdminReservas'
 import AdminHorarios from './AdminHorarios'
 import ConfirmDialog from './ConfirmDialog'
 import { deleteMesa, getMesas, updateMesa } from '../services/mesasService'
-import { getReservasFuturasActivasPorMesa, cancelarReserva } from '../services/reservasService'
+import { cancelarReserva, getReservas, getReservasFuturasActivasPorMesa } from '../services/reservasService'
 import { useToast } from '../context/ToastContext'
 
-const TABS = [
-  { id: 'mesas', label: '🪨 Mesas' },
-  { id: 'reservas', label: '📋 Reservas' },
-  { id: 'horarios', label: '🕐 Horarios' }
-]
+const ZONAS = ['Zona interior', 'Zona terraza', 'Zona ventana']
+
+// ── Estado visual del tile de mesa ──────────────────────────────
+const ESTADO_META = {
+  disponible: { bg: 'mesa-tile--disponible', label: 'Disponible', dot: '#72a844' },
+  ocupada:    { bg: 'mesa-tile--ocupada',    label: 'Ocupada',    dot: '#9a9288' },
+  bloqueada:  { bg: 'mesa-tile--bloqueada',  label: 'Bloqueada',  dot: '#6a7fa8' }
+}
+
+// ── Dropdown de opciones adicionales ────────────────────────────
+function MoreMenu({ mesa, onBloquear, onDesbloquear, onCambiarEstado, onEliminar, disabled }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  const act = (fn) => { setOpen(false); fn() }
+
+  return (
+    <div className="more-menu-wrap" ref={ref}>
+      <button
+        type="button"
+        className="mini-button mini-button--state more-menu-trigger"
+        onClick={() => setOpen(v => !v)}
+        disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`Más opciones para Mesa ${mesa.numero}`}
+      >
+        <MoreHorizontal size={14} aria-hidden="true" />
+        <ChevronDown size={12} aria-hidden="true" style={{ transition: 'transform 150ms', transform: open ? 'rotate(180deg)' : 'none' }} />
+      </button>
+
+      {open && (
+        <div className="more-menu-dropdown" role="menu">
+          {mesa.estado === 'bloqueada' ? (
+            <button role="menuitem" type="button" className="more-menu-item more-menu-item--unlock"
+              onClick={() => act(() => onDesbloquear(mesa))}>
+              <Unlock size={14} aria-hidden="true" /> Desbloquear mesa
+            </button>
+          ) : (
+            <button role="menuitem" type="button" className="more-menu-item more-menu-item--lock"
+              onClick={() => act(() => onBloquear(mesa))}>
+              <Lock size={14} aria-hidden="true" /> Bloquear mesa
+            </button>
+          )}
+
+          {mesa.estado !== 'bloqueada' && (
+            <button role="menuitem" type="button" className="more-menu-item"
+              onClick={() => act(() => onCambiarEstado(mesa))}>
+              {mesa.estado === 'ocupada' ? ' Marcar disponible' : ' Marcar ocupada'}
+            </button>
+          )}
+
+          <div className="more-menu-divider" role="separator" />
+
+          <button role="menuitem" type="button" className="more-menu-item more-menu-item--danger"
+            onClick={() => act(() => onEliminar(mesa))}>
+            <Trash2 size={14} aria-hidden="true" /> Eliminar mesa
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Tile visual de una mesa (reemplaza la fila de tabla) ─────────
+function MesaTile({ mesa, onEditar, onBloquear, onDesbloquear, onCambiarEstado, onEliminar, saving }) {
+  const meta = ESTADO_META[mesa.estado] || ESTADO_META.disponible
+  return (
+    <article className={`mesa-tile ${meta.bg}`} aria-label={`Mesa ${mesa.numero}, ${meta.label}`}>
+      <div className="mesa-tile__header">
+        <span className="mesa-tile__numero">{mesa.numero}</span>
+        <span className="mesa-tile__estado-dot" style={{ background: meta.dot }} aria-hidden="true" />
+      </div>
+
+      <div className="mesa-tile__info">
+        <span className="mesa-tile__cap">{mesa.capacidad} {mesa.capacidad === 1 ? 'persona' : 'personas'}</span>
+        <span className="mesa-tile__estado-label">{meta.label}</span>
+      </div>
+
+      <div className="mesa-tile__actions">
+        <button
+          type="button"
+          className="mini-button mini-button--state mesa-tile__edit-btn"
+          onClick={() => onEditar(mesa)}
+          disabled={saving}
+          aria-label={`Editar mesa ${mesa.numero}`}
+        >
+          <Pencil size={12} aria-hidden="true" /> Editar
+        </button>
+        <MoreMenu
+          mesa={mesa}
+          disabled={saving}
+          onBloquear={onBloquear}
+          onDesbloquear={onDesbloquear}
+          onCambiarEstado={onCambiarEstado}
+          onEliminar={onEliminar}
+        />
+      </div>
+    </article>
+  )
+}
 
 export default function AdminPanel({ onMesasChanged }) {
   const { addToast } = useToast()
   const [tab, setTab] = useState('mesas')
   const [mesas, setMesas] = useState([])
+  const [reservas, setReservas] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
+  // Filters (mesas)
+  const [filtroEstado, setFiltroEstado] = useState('todos')
+  const [filtroCapacidad, setFiltroCapacidad] = useState('')
+
+  // Modals / dialogs
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [mesaAEditar, setMesaAEditar] = useState(null)
-
-  // Confirm dialogs state
   const [confirmEliminar, setConfirmEliminar] = useState(null)
-  const [confirmBloqueo, setConfirmBloqueo] = useState(null) // { mesa, reservasAfectadas }
+  const [confirmBloqueo, setConfirmBloqueo] = useState(null)
   const [reservasCanceladas, setReservasCanceladas] = useState([])
-  const [showBloqueoResultado, setShowBloqueoResultado] = useState(false)
+  const [showBloqueoAviso, setShowBloqueoAviso] = useState(false)
 
   const cargar = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await getMesas()
-    if (error) {
-      addToast('No se pudieron cargar las mesas.', 'error')
-      setMesas([])
-    } else {
-      setMesas(data || [])
-    }
+    const [{ data: dm }, { data: dr }] = await Promise.all([getMesas(), getReservas()])
+    setMesas(dm || [])
+    setReservas(dr || [])
     setLoading(false)
-  }, [addToast])
+  }, [])
 
   useEffect(() => { cargar() }, [cargar])
 
-  const resumen = useMemo(() => ({
-    total: mesas.length,
-    disponibles: mesas.filter((m) => m.estado === 'disponible').length,
-    ocupadas: mesas.filter((m) => m.estado === 'ocupada').length,
-    bloqueadas: mesas.filter((m) => m.estado === 'bloqueada').length
-  }), [mesas])
+  // ── Derived stats ──────────────────────────────────────────────
+  const hoy = new Date().toISOString().split('T')[0]
+  const stats = useMemo(() => ({
+    mesas: mesas.length,
+    disponibles: mesas.filter(m => m.estado === 'disponible').length,
+    ocupadas: mesas.filter(m => m.estado === 'ocupada').length,
+    bloqueadas: mesas.filter(m => m.estado === 'bloqueada').length,
+    reservasHoy: reservas.filter(r => r.fecha === hoy && r.estado === 'activa').length,
+    reservasActivas: reservas.filter(r => r.estado === 'activa').length
+  }), [mesas, reservas, hoy])
 
-  // ── Cambiar estado manual disponible/ocupada ──
+  const capacidadesUnicas = useMemo(() =>
+    [...new Set(mesas.map(m => m.capacidad))].sort((a, b) => a - b), [mesas])
+
+  const mesasFiltradas = useMemo(() => mesas.filter(m => {
+    if (filtroEstado !== 'todos' && m.estado !== filtroEstado) return false
+    if (filtroCapacidad && String(m.capacidad) !== filtroCapacidad) return false
+    return true
+  }), [mesas, filtroEstado, filtroCapacidad])
+
+  const mesasPorZona = useMemo(() => ZONAS.reduce((acc, zona) => {
+    const grupo = mesasFiltradas.filter(m => m.ubicacion === zona)
+    if (grupo.length) acc[zona] = grupo
+    return acc
+  }, {}), [mesasFiltradas])
+
+  const sinUbicacion = useMemo(() =>
+    mesasFiltradas.filter(m => !ZONAS.includes(m.ubicacion)), [mesasFiltradas])
+
+  // ── Actions ────────────────────────────────────────────────────
+  const refresh = async () => { await cargar(); onMesasChanged() }
+
   const handleCambiarEstado = async (mesa) => {
     if (mesa.estado === 'bloqueada') return
-    const nuevo = mesa.estado === 'ocupada' ? 'disponible' : 'ocupada'
     setSaving(true)
+    const nuevo = mesa.estado === 'ocupada' ? 'disponible' : 'ocupada'
     const { error } = await updateMesa(mesa.id, { estado: nuevo })
-    if (error) {
-      addToast('No se pudo cambiar el estado de la mesa.', 'error')
-    } else {
-      addToast(`Mesa ${mesa.numero} marcada como ${nuevo}.`, 'success')
-      await cargar()
-      onMesasChanged()
-    }
+    if (error) addToast('No se pudo cambiar el estado.', 'error')
+    else { addToast(`Mesa ${mesa.numero} → ${nuevo}.`, 'success'); await refresh() }
     setSaving(false)
   }
 
-  // ── Bloquear mesa (RF-12) ──
   const handleSolicitarBloqueo = async (mesa) => {
     setSaving(true)
-    const { data: reservasFuturas } = await getReservasFuturasActivasPorMesa(mesa.id)
+    const { data } = await getReservasFuturasActivasPorMesa(mesa.id)
     setSaving(false)
-
-    if (reservasFuturas && reservasFuturas.length > 0) {
-      setConfirmBloqueo({ mesa, reservasAfectadas: reservasFuturas })
-    } else {
-      setConfirmBloqueo({ mesa, reservasAfectadas: [] })
-    }
+    setConfirmBloqueo({ mesa, reservasAfectadas: data || [] })
   }
 
   const handleConfirmarBloqueo = async () => {
     if (!confirmBloqueo) return
     const { mesa, reservasAfectadas } = confirmBloqueo
     setSaving(true)
-
-    // Cancelar reservas activas futuras
     const canceladas = []
     for (const r of reservasAfectadas) {
       const { error } = await cancelarReserva(r.id)
       if (!error) canceladas.push(r)
     }
-
-    // Bloquear mesa
     const { error } = await updateMesa(mesa.id, { estado: 'bloqueada' })
-    if (error) {
-      addToast('No se pudo bloquear la mesa.', 'error')
-      setSaving(false)
-      setConfirmBloqueo(null)
-      return
-    }
-
-    await cargar()
-    onMesasChanged()
-    setSaving(false)
-    setConfirmBloqueo(null)
-
+    if (error) { addToast('No se pudo bloquear la mesa.', 'error'); setSaving(false); setConfirmBloqueo(null); return }
+    await refresh()
+    setSaving(false); setConfirmBloqueo(null)
     if (canceladas.length > 0) {
-      setReservasCanceladas(canceladas)
-      setShowBloqueoResultado(true)
-      addToast(`Mesa ${mesa.numero} bloqueada. Se cancelaron ${canceladas.length} reserva(s) activas.`, 'warning')
+      setReservasCanceladas(canceladas); setShowBloqueoAviso(true)
+      addToast(`Mesa ${mesa.numero} bloqueada. ${canceladas.length} reserva(s) canceladas.`, 'warning')
     } else {
-      addToast(`Mesa ${mesa.numero} bloqueada correctamente.`, 'success')
+      addToast(`Mesa ${mesa.numero} bloqueada.`, 'success')
     }
   }
 
-  // ── Desbloquear mesa ──
   const handleDesbloquear = async (mesa) => {
     setSaving(true)
     const { error } = await updateMesa(mesa.id, { estado: 'disponible' })
-    if (error) {
-      addToast('No se pudo desbloquear la mesa.', 'error')
-    } else {
-      addToast(`Mesa ${mesa.numero} desbloqueada y disponible nuevamente.`, 'success')
-      await cargar()
-      onMesasChanged()
-    }
+    if (error) addToast('No se pudo desbloquear.', 'error')
+    else { addToast(`Mesa ${mesa.numero} disponible nuevamente.`, 'success'); await refresh() }
     setSaving(false)
   }
-
-  // ── Eliminar mesa ──
-  const handleSolicitarEliminar = (mesa) => setConfirmEliminar(mesa)
 
   const handleConfirmarEliminar = async () => {
     if (!confirmEliminar) return
     setSaving(true)
     const { error } = await deleteMesa(confirmEliminar.id)
-    if (error) {
-      addToast('No se pudo eliminar la mesa. Puede tener reservas asociadas.', 'error')
-    } else {
-      addToast(`Mesa ${confirmEliminar.numero} eliminada correctamente.`, 'success')
-      await cargar()
-      onMesasChanged()
-    }
-    setSaving(false)
-    setConfirmEliminar(null)
+    if (error) addToast('No se pudo eliminar. Puede tener reservas asociadas.', 'error')
+    else { addToast(`Mesa ${confirmEliminar.numero} eliminada.`, 'success'); await refresh() }
+    setSaving(false); setConfirmEliminar(null)
   }
 
-  const estadoPill = (estado) => {
-    if (estado === 'disponible') return <span className="status-pill status-pill--available">{estado}</span>
-    if (estado === 'ocupada') return <span className="status-pill status-pill--occupied">{estado}</span>
-    if (estado === 'bloqueada') return <span className="status-pill status-pill--blocked">{estado}</span>
-    return <span className="status-pill">{estado}</span>
-  }
+  // ── Tab config ─────────────────────────────────────────────────
+  const TABS = [
+    {
+      id: 'mesas',
+      icon: <TableProperties size={18} aria-hidden="true" />,
+      label: ' Mesas',
+      badge: stats.mesas,
+      desc: `${stats.disponibles} disponibles`
+    },
+    {
+      id: 'reservas',
+      icon: <ClipboardList size={18} aria-hidden="true" />,
+      label: ' Reservas',
+      badge: stats.reservasHoy,
+      badgeColor: stats.reservasHoy > 0 ? 'badge--hot' : '',
+      desc: stats.reservasHoy > 0 ? `${stats.reservasHoy} para hoy` : 'Ver todas'
+    },
+    {
+      id: 'horarios',
+      icon: <Clock size={18} aria-hidden="true" />,
+      label: 'Horarios',
+      desc: 'Turnos y apertura'
+    }
+  ]
 
   return (
     <section className="admin-card">
-      <div className="admin-card__header">
-        <div>
-          <p className="eyebrow">Panel del administrador</p>
-          <h2>Gestión del restaurante</h2>
-          <p>Administra mesas, visualiza reservas y configura los horarios de atención.</p>
+
+      {/* ── Encabezado ── */}
+      <div className="admin-panel-header">
+        <p className="eyebrow">Panel del administrador</p>
+        <h2>Comidas Rápidas The Gordo</h2>
+        <p> Gestiona mesas, reservas y horarios del restaurante desde aquí.</p>
+      </div>
+
+      {/* ── Tarjetas de resumen ── */}
+      <div className="admin-stats-row">
+        <div className="admin-stat-card">
+          <strong>{stats.disponibles}</strong>
+          <span>Mesas libres</span>
+          <i className="admin-stat-dot" style={{ background: '#72a844' }} />
+        </div>
+        <div className="admin-stat-card">
+          <strong>{stats.ocupadas}</strong>
+          <span> Ocupadas</span>
+          <i className="admin-stat-dot" style={{ background: '#9a9288' }} />
+        </div>
+        <div className="admin-stat-card">
+          <strong>{stats.bloqueadas}</strong>
+          <span> Bloqueadas</span>
+          <i className="admin-stat-dot" style={{ background: '#6a7fa8' }} />
+        </div>
+        <div className={`admin-stat-card ${stats.reservasHoy > 0 ? 'admin-stat-card--hot' : ''}`}>
+          <strong>{stats.reservasHoy}</strong>
+          <span> Reservas hoy</span>
+          <i className="admin-stat-dot" style={{ background: '#e87528' }} />
         </div>
       </div>
 
-      {/* Summary */}
-      <div className="admin-summary" style={{ gridTemplateColumns: 'repeat(4,minmax(130px,1fr))' }}>
-        <article><strong>{resumen.total}</strong><span>Total mesas</span></article>
-        <article><strong>{resumen.disponibles}</strong><span>Disponibles</span></article>
-        <article><strong>{resumen.ocupadas}</strong><span>Ocupadas</span></article>
-        <article><strong>{resumen.bloqueadas}</strong><span>Bloqueadas</span></article>
-      </div>
-
-      {/* Warning: cancelled reservations after blocking */}
-      {showBloqueoResultado && reservasCanceladas.length > 0 && (
-        <div className="bloqueo-resultado" role="alert">
-          <div className="bloqueo-resultado__header">
-            <strong>⚠️ Aviso: Debes contactar a los clientes afectados</strong>
-            <button type="button" className="toast__close" onClick={() => setShowBloqueoResultado(false)} aria-label="Cerrar aviso">×</button>
+      {/* ── Aviso de reservas canceladas tras bloqueo ── */}
+      {showBloqueoAviso && reservasCanceladas.length > 0 && (
+        <div className="admin-aviso admin-aviso--warning" role="alert">
+          <div className="admin-aviso__header">
+            <AlertTriangle size={18} aria-hidden="true" />
+            <strong>Debes contactar a {reservasCanceladas.length} cliente(s) afectado(s)</strong>
+            <button type="button" className="modal-close-btn" onClick={() => setShowBloqueoAviso(false)} aria-label="Cerrar aviso">×</button>
           </div>
-          <p>Las siguientes reservas fueron canceladas automáticamente al bloquear la mesa. Por favor comunícate con cada cliente:</p>
-          <div className="bloqueo-clientes">
-            {reservasCanceladas.map((r) => (
-              <div key={r.id} className="bloqueo-cliente-card">
+          <p>Sus reservas fueron canceladas al bloquear la mesa. Llama o escríbeles para avisarles:</p>
+          <div className="admin-aviso__clientes">
+            {reservasCanceladas.map(r => (
+              <div key={r.id} className="admin-aviso__cliente">
                 <strong>{r.cliente_nombre}</strong>
-                <span>📞 <a href={`tel:${r.cliente_tel}`}>{r.cliente_tel}</a></span>
-                <span>✉️ <a href={`mailto:${r.cliente_email}`}>{r.cliente_email}</a></span>
-                <span>🗓️ {r.fecha} · {r.hora?.slice(0,5)}</span>
+                <a href={`tel:${r.cliente_tel}`}> {r.cliente_tel}</a>
+                <a href={`mailto:${r.cliente_email}`}> {r.cliente_email}</a>
+                <span> {r.fecha} · {r.hora?.slice(0, 5)}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="view-switch" role="tablist" aria-label="Secciones del panel">
-        {TABS.map((t) => (
+      {/* ── Navegación de tabs ── */}
+      <nav className="admin-tab-nav" role="tablist" aria-label="Secciones del panel">
+        {TABS.map(t => (
           <button
             key={t.id}
             type="button"
             role="tab"
             aria-selected={tab === t.id}
-            aria-controls={`tab-panel-${t.id}`}
-            className={tab === t.id ? 'view-switch__button view-switch__button--active' : 'view-switch__button'}
+            aria-controls={`panel-${t.id}`}
+            className={`admin-tab-btn ${tab === t.id ? 'admin-tab-btn--active' : ''}`}
             onClick={() => setTab(t.id)}
           >
-            {t.label}
+            <span className="admin-tab-btn__icon">{t.icon}</span>
+            <span className="admin-tab-btn__text">
+              <span className="admin-tab-btn__label">
+                {t.label}
+                {t.badge != null && (
+                  <span className={`admin-tab-badge ${t.badgeColor || ''}`}>{t.badge}</span>
+                )}
+              </span>
+              <span className="admin-tab-btn__desc">{t.desc}</span>
+            </span>
           </button>
         ))}
-      </div>
+      </nav>
 
-      {/* Tab: Mesas */}
+      {/* ══ TAB: MESAS ══════════════════════════════════════════ */}
       {tab === 'mesas' && (
-        <div id="tab-panel-mesas" role="tabpanel" aria-label="Gestión de mesas">
-          <div className="admin-actions" style={{ marginTop: 20 }}>
-            <button
-              type="button"
-              className="button button--primary"
-              onClick={() => setShowCreateModal(true)}
-              disabled={loading || saving}
-            >
-              + Nueva mesa
-            </button>
-            <button
-              type="button"
-              className="button button--ghost"
-              onClick={() => { cargar(); onMesasChanged() }}
-              disabled={loading || saving}
-            >
-              Actualizar
-            </button>
-          </div>
+        <div id="panel-mesas" role="tabpanel" aria-label="Gestión de mesas">
 
-          <div className="admin-table-card">
-            <div className="admin-table-card__header">
-              <h3>Mesas registradas</h3>
+          {/* Barra de acciones + filtros */}
+          <div className="admin-section-toolbar">
+            <div className="admin-section-toolbar__filters">
+              <label htmlFor="fm-estado" className="toolbar-filter-label">
+                Estado
+                <select id="fm-estado" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}>
+                  <option value="todos">Todos</option>
+                  <option value="disponible">Disponible</option>
+                  <option value="ocupada"> Ocupada</option>
+                  <option value="bloqueada"> Bloqueada</option>
+                </select>
+              </label>
+              <label htmlFor="fm-cap" className="toolbar-filter-label">
+                Capacidad
+                <select id="fm-cap" value={filtroCapacidad} onChange={e => setFiltroCapacidad(e.target.value)}>
+                  <option value="">Todas</option>
+                  {capacidadesUnicas.map(c => (
+                    <option key={c} value={c}>{c} {c === 1 ? 'persona' : 'personas'}</option>
+                  ))}
+                </select>
+              </label>
+              {(filtroEstado !== 'todos' || filtroCapacidad) && (
+                <button type="button" className="toolbar-clear-btn"
+                  onClick={() => { setFiltroEstado('todos'); setFiltroCapacidad('') }}>
+                  Limpiar
+                </button>
+              )}
             </div>
-
-            {loading ? (
-              <div className="admin-loading">Cargando mesas...</div>
-            ) : mesas.length === 0 ? (
-              <div className="no-tables"><h3>Sin mesas</h3><p>Crea la primera mesa desde el botón superior.</p></div>
-            ) : (
-              <div className="admin-table-wrapper">
-                <table className="admin-table">
-                  <thead>
-                    <tr>
-                      <th>Mesa</th>
-                      <th>Capacidad</th>
-                      <th>Ubicación</th>
-                      <th>Estado</th>
-                      <th>Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mesas.map((mesa) => (
-                      <tr key={mesa.id}>
-                        <td data-label="Mesa"><strong>Mesa {mesa.numero}</strong></td>
-                        <td data-label="Capacidad">{mesa.capacidad} {Number(mesa.capacidad) === 1 ? 'persona' : 'personas'}</td>
-                        <td data-label="Ubicación">{mesa.ubicacion || '–'}</td>
-                        <td data-label="Estado">{estadoPill(mesa.estado)}</td>
-                        <td data-label="Acciones">
-                          <div className="table-actions">
-                            {/* Editar (RF-11) */}
-                            <button
-                              type="button"
-                              className="mini-button mini-button--state"
-                              onClick={() => setMesaAEditar(mesa)}
-                              disabled={saving}
-                              aria-label={`Editar mesa ${mesa.numero}`}
-                            >
-                              Editar
-                            </button>
-
-                            {/* Bloquear / Desbloquear (RF-12) */}
-                            {mesa.estado === 'bloqueada' ? (
-                              <button
-                                type="button"
-                                className="mini-button mini-button--unlock"
-                                onClick={() => handleDesbloquear(mesa)}
-                                disabled={saving}
-                                aria-label={`Desbloquear mesa ${mesa.numero}`}
-                              >
-                                Desbloquear
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="mini-button mini-button--lock"
-                                onClick={() => handleSolicitarBloqueo(mesa)}
-                                disabled={saving}
-                                aria-label={`Bloquear mesa ${mesa.numero}`}
-                              >
-                                Bloquear
-                              </button>
-                            )}
-
-                            {/* Cambiar ocupada/disponible (solo si no está bloqueada) */}
-                            {mesa.estado !== 'bloqueada' && (
-                              <button
-                                type="button"
-                                className="mini-button mini-button--state"
-                                onClick={() => handleCambiarEstado(mesa)}
-                                disabled={saving}
-                              >
-                                {mesa.estado === 'ocupada' ? 'Desocupar' : 'Ocupar'}
-                              </button>
-                            )}
-
-                            {/* Eliminar */}
-                            <button
-                              type="button"
-                              className="mini-button mini-button--danger"
-                              onClick={() => handleSolicitarEliminar(mesa)}
-                              disabled={saving}
-                              aria-label={`Eliminar mesa ${mesa.numero}`}
-                            >
-                              Eliminar
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <div className="admin-section-toolbar__actions">
+              <button type="button" className="button button--ghost" onClick={refresh} disabled={loading || saving}>
+                <RefreshCw size={14} aria-hidden="true" />
+              </button>
+              <button type="button" className="button button--primary" onClick={() => setShowCreateModal(true)} disabled={saving}>
+                <Plus size={14} aria-hidden="true" /> Nueva mesa
+              </button>
+            </div>
           </div>
+
+          {/* Leyenda de estados */}
+          <div className="mesas-leyenda">
+            {Object.entries(ESTADO_META).map(([k, v]) => (
+              <span key={k} className="mesas-leyenda__item">
+                <i style={{ background: v.dot }} aria-hidden="true" />
+                {v.label}
+              </span>
+            ))}
+          </div>
+
+          {/* Mesas por zona */}
+          {loading ? (
+            <div className="admin-loading">Cargando mesas...</div>
+          ) : mesasFiltradas.length === 0 ? (
+            <div className="no-tables">
+              <h3>Sin resultados</h3>
+              <p>No hay mesas con los filtros aplicados.</p>
+            </div>
+          ) : (
+            <div className="admin-zonas-wrap">
+              {Object.entries(mesasPorZona).map(([zona, grupo]) => (
+                <section key={zona} className="admin-zona-section">
+                  <header className="admin-zona-section__header">
+                    <h3>{zona}</h3>
+                    <div className="admin-zona-section__pills">
+                      <span className="zona-pill zona-pill--green">{grupo.filter(m => m.estado === 'disponible').length} libres</span>
+                      {grupo.filter(m => m.estado === 'ocupada').length > 0 && (
+                        <span className="zona-pill zona-pill--gray">{grupo.filter(m => m.estado === 'ocupada').length} ocupadas</span>
+                      )}
+                      {grupo.filter(m => m.estado === 'bloqueada').length > 0 && (
+                        <span className="zona-pill zona-pill--blue">{grupo.filter(m => m.estado === 'bloqueada').length} bloqueadas</span>
+                      )}
+                    </div>
+                  </header>
+                  <div className="mesa-tiles-grid">
+                    {grupo.map(mesa => (
+                      <MesaTile
+                        key={mesa.id}
+                        mesa={mesa}
+                        saving={saving}
+                        onEditar={setMesaAEditar}
+                        onBloquear={handleSolicitarBloqueo}
+                        onDesbloquear={handleDesbloquear}
+                        onCambiarEstado={handleCambiarEstado}
+                        onEliminar={setConfirmEliminar}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+              {sinUbicacion.length > 0 && (
+                <section className="admin-zona-section">
+                  <header className="admin-zona-section__header">
+                    <h3>Sin zona asignada</h3>
+                  </header>
+                  <div className="mesa-tiles-grid">
+                    {sinUbicacion.map(mesa => (
+                      <MesaTile key={mesa.id} mesa={mesa} saving={saving}
+                        onEditar={setMesaAEditar} onBloquear={handleSolicitarBloqueo}
+                        onDesbloquear={handleDesbloquear} onCambiarEstado={handleCambiarEstado}
+                        onEliminar={setConfirmEliminar} />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Tab: Reservas */}
+      {/* ══ TAB: RESERVAS ═══════════════════════════════════════ */}
       {tab === 'reservas' && (
-        <div id="tab-panel-reservas" role="tabpanel" aria-label="Gestión de reservas" style={{ marginTop: 20 }}>
-          <AdminReservas />
+        <div id="panel-reservas" role="tabpanel" aria-label="Gestión de reservas">
+          <AdminReservas onDataChanged={cargar} />
         </div>
       )}
 
-      {/* Tab: Horarios */}
+      {/* ══ TAB: HORARIOS ═══════════════════════════════════════ */}
       {tab === 'horarios' && (
-        <div id="tab-panel-horarios" role="tabpanel" aria-label="Gestión de horarios" style={{ marginTop: 20 }}>
+        <div id="panel-horarios" role="tabpanel" aria-label="Gestión de horarios">
           <AdminHorarios />
         </div>
       )}
 
-      {/* Modales */}
+      {/* ── Modales ── */}
       {showCreateModal && (
-        <CreateMesaModal
-          mesas={mesas}
-          onClose={() => setShowCreateModal(false)}
+        <CreateMesaModal mesas={mesas} onClose={() => setShowCreateModal(false)}
           onMesaCreada={async () => {
             setShowCreateModal(false)
             addToast('Mesa creada correctamente.', 'success')
-            await cargar()
-            onMesasChanged()
-          }}
-        />
+            await refresh()
+          }} />
       )}
 
       {mesaAEditar && (
-        <EditMesaModal
-          mesa={mesaAEditar}
+        <EditMesaModal mesa={mesaAEditar} addToast={addToast}
           onClose={() => setMesaAEditar(null)}
           onMesaEditada={async () => {
             setMesaAEditar(null)
-            addToast('Mesa actualizada correctamente.', 'success')
-            await cargar()
-            onMesasChanged()
-          }}
-        />
+            addToast('Mesa actualizada.', 'success')
+            await refresh()
+          }} />
       )}
 
-      {/* Confirm: Eliminar mesa */}
       <ConfirmDialog
         isOpen={Boolean(confirmEliminar)}
         title="Eliminar mesa"
-        message={confirmEliminar
-          ? `¿Seguro que deseas eliminar la Mesa ${confirmEliminar.numero}? Esta acción no se puede deshacer.`
-          : ''}
+        message={confirmEliminar ? `¿Eliminar Mesa ${confirmEliminar.numero} permanentemente? No se puede deshacer.` : ''}
         onConfirm={handleConfirmarEliminar}
         onCancel={() => setConfirmEliminar(null)}
-        confirmLabel="Sí, eliminar"
-        cancelLabel="Cancelar"
-        variant="danger"
-        isLoading={saving}
+        confirmLabel="Sí, eliminar" cancelLabel="Cancelar"
+        variant="danger" isLoading={saving}
       />
 
-      {/* Confirm: Bloquear mesa */}
       <ConfirmDialog
         isOpen={Boolean(confirmBloqueo)}
-        title={confirmBloqueo?.reservasAfectadas?.length > 0 ? '⚠️ Bloquear mesa con reservas activas' : 'Bloquear mesa'}
-        message={
-          confirmBloqueo?.reservasAfectadas?.length > 0
-            ? `La Mesa ${confirmBloqueo.mesa.numero} tiene ${confirmBloqueo.reservasAfectadas.length} reserva(s) activa(s) próximas. Al bloquearla se cancelarán automáticamente y deberás avisar a los clientes.`
-            : `¿Confirmas el bloqueo de la Mesa ${confirmBloqueo?.mesa.numero}? Los clientes no podrán reservarla hasta que la desbloquees.`
+        title={confirmBloqueo?.reservasAfectadas?.length > 0 ? ' Esta mesa tiene reservas activas' : 'Bloquear mesa'}
+        message={confirmBloqueo?.reservasAfectadas?.length > 0
+          ? `La Mesa ${confirmBloqueo.mesa.numero} tiene ${confirmBloqueo.reservasAfectadas.length} reserva(s) próxima(s). Al bloquearla se cancelarán automáticamente y deberás avisarle a cada cliente.`
+          : `¿Bloquear Mesa ${confirmBloqueo?.mesa.numero}? Quedará inhabilitada para reservas hasta que la desbloquees.`
         }
-        details={confirmBloqueo?.reservasAfectadas?.length > 0
-          ? confirmBloqueo.reservasAfectadas.map((r) =>
-              `${r.fecha} ${r.hora?.slice(0,5)} — ${r.cliente_nombre} · 📞 ${r.cliente_tel} · ✉️ ${r.cliente_email}`
-            )
-          : []
-        }
+        reservasCards={confirmBloqueo?.reservasAfectadas?.length > 0 ? confirmBloqueo.reservasAfectadas : undefined}
         onConfirm={handleConfirmarBloqueo}
         onCancel={() => setConfirmBloqueo(null)}
         confirmLabel={confirmBloqueo?.reservasAfectadas?.length > 0 ? 'Bloquear y cancelar reservas' : 'Sí, bloquear'}

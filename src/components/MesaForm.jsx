@@ -20,7 +20,7 @@ function MesaForm({ onCreated }) {
   const handleSubmit = async (e) => {
     e.preventDefault()
 
-    // 🔥 confirmación
+    // confirmación
     const confirmar = window.confirm('¿Deseas crear esta mesa?')
     if (!confirmar) return
 

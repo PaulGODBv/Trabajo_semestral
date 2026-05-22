@@ -4,17 +4,18 @@ export const getHorarios = async () => {
   const { data, error } = await supabase
     .from('horarios')
     .select('*')
-    .order('id')
+    .order('dia_semana')
+    .order('hora_inicio')
   return { data, error }
 }
 
-export const getHorarioActivoPorDia = async (diaSemana) => {
+export const getHorariosActivosPorDia = async (diaSemana) => {
   const { data, error } = await supabase
     .from('horarios')
     .select('*')
     .eq('dia_semana', diaSemana)
     .eq('activo', true)
-    .limit(1)
+    .order('hora_inicio')
   return { data, error }
 }
 
@@ -27,7 +28,6 @@ export const guardarHorario = async ({ id, dia_semana, hora_inicio, hora_fin, ac
       .select()
     return { data, error }
   }
-
   const { data, error } = await supabase
     .from('horarios')
     .insert([{ dia_semana, hora_inicio, hora_fin, activo }])

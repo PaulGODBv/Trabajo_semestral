@@ -58,7 +58,7 @@ function MesasList() {
         ))}
       </div>
 
-      {/* 🔥 MODAL */}
+      {/* MODAL */}
       {mesaSeleccionada && (
         <Modal onClose={() => setMesaSeleccionada(null)}>
           <ReservaForm

@@ -41,8 +41,8 @@ export default function ConfirmationModal({ reserva, isSubmitting, onClose, onCo
         aria-describedby="rm-desc"
       >
         <div className="reservation-modal__header">
-          <p className="eyebrow">Última revisión</p>
-          <h2 id="rm-title">Revisa antes de confirmar</h2>
+          <p className="eyebrow"> Última revisión</p>
+          <h2 id="rm-title"> Revisa antes de confirmar</h2>
           <p id="rm-desc">Verifica que los datos estén correctos antes de guardar la reserva.</p>
         </div>
 
@@ -75,7 +75,7 @@ export default function ConfirmationModal({ reserva, isSubmitting, onClose, onCo
             onClick={onConfirm}
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Guardando...' : 'Confirmar reserva'}
+            {isSubmitting ? 'Guardando...' : ' Confirmar reserva'}
           </button>
         </div>
       </section>

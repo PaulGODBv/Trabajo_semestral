@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient'
 
-const ESTADOS_ACTIVOS = ['activa', 'confirmada']
+const ESTADOS_ACTIVOS = ['activa']
 
 export const getReservas = async () => {
   const { data, error } = await supabase
@@ -8,15 +8,6 @@ export const getReservas = async () => {
     .select('*, mesas(numero, ubicacion)')
     .order('fecha', { ascending: false })
     .order('hora', { ascending: false })
-  return { data, error }
-}
-
-export const getReservasActivas = async () => {
-  const { data, error } = await supabase
-    .from('reservas')
-    .select('*, mesas(numero, ubicacion)')
-    .in('estado', ESTADOS_ACTIVOS)
-    .order('fecha', { ascending: false })
   return { data, error }
 }
 
@@ -40,6 +31,15 @@ export const createReserva = async (reserva) => {
   return { data, error }
 }
 
+export const updateReserva = async (id, updates) => {
+  const { data, error } = await supabase
+    .from('reservas')
+    .update(updates)
+    .eq('id', id)
+    .select()
+  return { data, error }
+}
+
 export const cancelarReserva = async (id) => {
   const { data, error } = await supabase
     .from('reservas')
@@ -49,7 +49,15 @@ export const cancelarReserva = async (id) => {
   return { data, error }
 }
 
-// RF-07: Verifica si una mesa ya tiene reserva activa para esa fecha y hora
+export const reactivarReserva = async (id, mesaId) => {
+  const { data, error } = await supabase
+    .from('reservas')
+    .update({ estado: 'activa', mesa_id: mesaId })
+    .eq('id', id)
+    .select()
+  return { data, error }
+}
+
 export const verificarDisponibilidad = async (mesaId, fecha, hora) => {
   const { data, error } = await supabase
     .from('reservas')
