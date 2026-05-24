@@ -31,6 +31,28 @@ export const createReserva = async (reserva) => {
   return { data, error }
 }
 
+export const reservarMesaAtomico = async (mesaId, fecha, hora, clienteNombre, clienteTel, clienteEmail, numPersonas) => {
+  const { data, error } = await supabase.rpc('reservar_mesa', {
+    p_mesa_id: mesaId,
+    p_fecha: fecha,
+    p_hora: hora,
+    p_cliente_nombre: clienteNombre,
+    p_cliente_tel: clienteTel,
+    p_cliente_email: clienteEmail,
+    p_num_personas: numPersonas
+  })
+
+  if (error) return { data: null, error }
+
+  const result = Array.isArray(data) ? data[0] : data
+
+  if (result?.error === 'conflicto') {
+    return { data: null, error: { code: 'CONFLICT', message: result.mensaje } }
+  }
+
+  return { data: result, error: null }
+}
+
 export const updateReserva = async (id, updates) => {
   const { data, error } = await supabase
     .from('reservas')

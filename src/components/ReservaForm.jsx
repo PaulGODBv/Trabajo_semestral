@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Calendar, Clock, Mail, Phone, User, Users } from 'lucide-react'
-import { updateMesa } from '../services/mesasService'
-import { createReserva, verificarDisponibilidad } from '../services/reservasService'
+import { reservarMesaAtomico } from '../services/reservasService'
 import { getHorariosActivosPorDia } from '../services/horariosService'
 import { getDiaSemana, generarSlots, normalizarHora } from '../utils/horarios'
 import ConfirmationModal from './ConfirmationModal'
@@ -121,40 +120,23 @@ function ReservaForm({ mesa, onCancel, onReservaCreada }) {
     setIsSubmitting(true)
     setErrors({})
 
-    // RF-07: check concurrency
-    const { disponible, error: checkErr } = await verificarDisponibilidad(mesa.id, form.fecha, form.hora)
-    if (checkErr || !disponible) {
-      setErrors({ general: 'Esta mesa ya fue reservada para ese horario. Por favor elige otro horario o una mesa diferente.' })
-      setIsSubmitting(false)
-      setMostrarConfirmacion(false)
-      return
-    }
+    const { data: reservaData, error: reservaError } = await reservarMesaAtomico(
+      mesa.id,
+      form.fecha,
+      form.hora,
+      form.cliente_nombre.trim(),
+      form.cliente_tel.trim(),
+      form.cliente_email.trim(),
+      personas
+    )
 
-    const reserva = {
-      mesa_id: mesa.id,
-      cliente_nombre: form.cliente_nombre.trim(),
-      cliente_tel: form.cliente_tel.trim(),
-      cliente_email: form.cliente_email.trim(),
-      fecha: form.fecha,
-      hora: form.hora,
-      num_personas: personas,
-      estado: 'activa'
-    }
-
-    const { data: reservaData, error: reservaError } = await createReserva(reserva)
     if (reservaError) {
-      const esConflicto = reservaError.code === '23505' || reservaError.message?.includes('unique')
-      setErrors({ general: esConflicto
-        ? 'La mesa fue tomada en el último momento. Elige otro horario o mesa.'
-        : 'No se pudo crear la reserva. Intenta nuevamente.' })
-      setIsSubmitting(false)
-      setMostrarConfirmacion(false)
-      return
-    }
-
-    const { error: mesaError } = await updateMesa(mesa.id, { estado: 'ocupada' })
-    if (mesaError) {
-      setErrors({ general: 'La reserva se creó, pero no se pudo actualizar el estado de la mesa.' })
+      const esConflicto = reservaError.code === 'CONFLICT' || reservaError.code === '23505'
+      setErrors({
+        general: esConflicto
+          ? 'La mesa fue tomada en el último momento. Elige otro horario o mesa.'
+          : 'No se pudo crear la reserva. Intenta nuevamente.'
+      })
       setIsSubmitting(false)
       setMostrarConfirmacion(false)
       return
@@ -163,8 +145,15 @@ function ReservaForm({ mesa, onCancel, onReservaCreada }) {
     setIsSubmitting(false)
     setMostrarConfirmacion(false)
     onReservaCreada({
-      ...reserva,
-      id: reservaData?.[0]?.id,
+      mesa_id: mesa.id,
+      cliente_nombre: form.cliente_nombre.trim(),
+      cliente_tel: form.cliente_tel.trim(),
+      cliente_email: form.cliente_email.trim(),
+      fecha: form.fecha,
+      hora: form.hora,
+      num_personas: personas,
+      estado: 'activa',
+      id: reservaData?.id || reservaData?.[0]?.id,
       mesa_numero: mesa.numero
     })
   }
