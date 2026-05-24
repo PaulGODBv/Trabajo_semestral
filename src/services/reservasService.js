@@ -31,7 +31,10 @@ export const createReserva = async (reserva) => {
   return { data, error }
 }
 
-export const reservarMesaAtomico = async (mesaId, fecha, hora, clienteNombre, clienteTel, clienteEmail, numPersonas) => {
+// Intenta reservar mediante el RPC atómico. Si el RPC no existe
+// (p. ej. no se ha ejecutado la migración), devuelve null para
+// que el llamador use la ruta alternativa (check + insert).
+export const reservarPorRPC = async (mesaId, fecha, hora, clienteNombre, clienteTel, clienteEmail, numPersonas) => {
   const { data, error } = await supabase.rpc('reservar_mesa', {
     p_mesa_id: mesaId,
     p_fecha: fecha,
@@ -42,15 +45,19 @@ export const reservarMesaAtomico = async (mesaId, fecha, hora, clienteNombre, cl
     p_num_personas: numPersonas
   })
 
-  if (error) return { data: null, error }
+  // Si la función RPC no existe, devolvemos null para hacer
+  // la reserva por la ruta directa (check + insert)
+  if (error?.code === 'PGRST202') return { data: null, error: null, rpcNoDisponible: true }
+
+  if (error) return { data: null, error, rpcNoDisponible: false }
 
   const result = Array.isArray(data) ? data[0] : data
 
   if (result?.error === 'conflicto') {
-    return { data: null, error: { code: 'CONFLICT', message: result.mensaje } }
+    return { data: null, error: { code: 'CONFLICT', message: result.mensaje }, rpcNoDisponible: false }
   }
 
-  return { data: result, error: null }
+  return { data: result, error: null, rpcNoDisponible: false }
 }
 
 export const updateReserva = async (id, updates) => {
