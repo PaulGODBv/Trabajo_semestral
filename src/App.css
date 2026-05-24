@@ -1975,7 +1975,7 @@ button {
 .salon-map__active-zone--window {
   background:
     radial-gradient(circle at 14% 20%, rgba(255,255,255,0.34) 0 6px, transparent 7px),
-    linear-gradient(90deg, rgba(81, 142, 160, 0.38) 0 22%, transparent 22%),
+    linear-gradient(90deg, rgba(81, 142, 160, 0.3) 0%, transparent 28%),
     linear-gradient(145deg, #fff0c8, #cdb99b);
 }
 
