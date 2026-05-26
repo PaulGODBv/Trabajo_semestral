@@ -90,6 +90,13 @@ Proyecto_semestral/
 
    La aplicación estará disponible en `http://localhost:5173`.
 
+## Credenciales de administrador
+
+| Campo    | Valor               |
+|----------|---------------------|
+| Email    | admin@thegordo.com  |
+| Contraseña | Contrasena12*     |
+
 ## Base de datos (Supabase)
 
 El proyecto utiliza **Supabase** (PostgreSQL) con las siguientes tablas:
